@@ -167,7 +167,7 @@
       metric(
         "Выручка за цикл",
         fmt(r.total.revenue),
-        "млн · " + board.currency,
+        board.currency,
       ),
       metric("Прибыль за цикл", fmt(r.total.profit), "Факты из журнала"),
       metric(
@@ -1310,6 +1310,7 @@
       $("appUpdate").hidden = !registration?.waiting;
     };
     navigator.serviceWorker.addEventListener("controllerchange", () => {
+      ready();
       if (updateRequested) location.reload();
     });
     navigator.serviceWorker
@@ -1320,7 +1321,7 @@
         r.addEventListener("updatefound", () => {
           const worker = r.installing;
           worker?.addEventListener("statechange", () => {
-            if (worker.state === "installed") ready();
+            ready();
           });
         });
       })
@@ -1343,7 +1344,8 @@
       )
         return;
       if (!registration?.waiting) {
-        toast("Обновление пока недоступно.");
+        ready();
+        toast("Ожидающих обновлений нет. Вы используете установленную версию доски.");
         return;
       }
       updateRequested = true;
