@@ -1,0 +1,21 @@
+name: Check public Supabase connection
+on:
+  push:
+    branches: [main]
+    paths:
+      - app-config.js
+      - scripts/verify-cloud.py
+      - .github/workflows/check-cloud.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  read-only-cloud-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Verify public key, auth endpoint and anonymous data protection
+        run: python3 scripts/verify-cloud.py
