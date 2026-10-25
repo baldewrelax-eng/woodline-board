@@ -164,11 +164,7 @@
         p + "%",
         `${done} из ${n} · не показатель продаж`,
       ),
-      metric(
-        "Выручка за цикл",
-        fmt(r.total.revenue),
-        board.currency,
-      ),
+      metric("Выручка за цикл", fmt(r.total.revenue), board.currency),
       metric("Прибыль за цикл", fmt(r.total.profit), "Факты из журнала"),
       metric(
         "Просрочено задач",
@@ -772,6 +768,39 @@
     }
   });
   function renderPlan() {
+    $("teamRoles").replaceChildren();
+    for (const role of P.roles || []) {
+      const card = el("article", "panel");
+      card.append(el("h3", "", role.name), el("p", "muted", role.focus));
+      $("teamRoles").append(card);
+    }
+    const archived = M.getArchivedTasks(board);
+    $("archivedSection").hidden = !archived.length;
+    $("archivedSummary").textContent =
+      `Архив исходных задач · ${archived.length}`;
+    $("archivedList").replaceChildren();
+    for (const task of archived) {
+      const button = el("button", "entry-row", `Вернуть: ${task.title}`);
+      button.onclick = () => {
+        if (!editable()) return;
+        try {
+          backup();
+          const candidate = M.validate(board);
+          candidate.legacySnapshot.archivedTasks =
+            candidate.legacySnapshot.archivedTasks.filter(
+              (x) => x.id !== task.id,
+            );
+          candidate.tasks.push(M.task(task));
+          board = M.validate(candidate);
+          save();
+          render();
+          toast("Задача возвращена из архива.");
+        } catch (e) {
+          toast(e.message, true);
+        }
+      };
+      $("archivedList").append(button);
+    }
     const root = $("seasons");
     root.replaceChildren();
     for (const season of P.seasonality || []) {
@@ -851,28 +880,24 @@
     board.currency = $("currency").value.trim() || "Валюта не подтверждена";
     save();
   });
+  function planSummary(proposal) {
+    return `Добавить сезонных задач: ${proposal.added}. Перенести неизменённые старые шаблоны в архив: ${proposal.archived}. Сохранить текущих задач: ${proposal.retained}. Личные правки, выполненные задачи, факты и заметки сохранятся.`;
+  }
   $("addSeasonTasks").addEventListener("click", () => {
     if (!editable()) return;
-    const missing = (P.tasks || []).filter(
-      (t) => !board.tasks.some((x) => x.id === t.id),
-    );
-    if (!missing.length) {
-      toast("Сезонные задачи уже добавлены. Их можно редактировать по одной.");
-      return;
-    }
-    if (
-      !confirm(
-        `Добавить ${missing.length} сезонных задач? Ваши текущие задачи останутся. Проверьте возможные дубли.`,
-      )
-    )
-      return;
     try {
+      const proposal = M.proposeSeasonPlan(board, P);
+      if (!proposal.added && !proposal.archived) {
+        toast("Сезонный план уже настроен. Все задачи можно редактировать.");
+        return;
+      }
+      if (!confirm(planSummary(proposal) + " Применить?")) return;
       backup();
-      board = M.validate({ ...board, tasks: board.tasks.concat(missing) });
+      board = proposal.board;
       save();
       render();
       toast(
-        "Сезонный план добавлен. Сроки и роли — предложение, уточните их под команду.",
+        "Сезонный план настроен. Исходные шаблоны доступны в архиве. Дождитесь сохранения в облаке.",
       );
     } catch (e) {
       toast(e.message, true);
@@ -892,22 +917,50 @@
     $("transferStatus").textContent =
       "Полный JSON готов. Нажмите «Копировать» и сохраните отдельно.";
   };
-  function parseJSON(text) {
+  function prepareImport(text) {
     let s = text.replace(/^\uFEFF/, "").trim();
     if (s.startsWith("```"))
       s = s.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+    let raw;
     try {
-      const raw = JSON.parse(s);
-      if (raw.kind === "woodline-baseline")
-        return M.validate({ ...board, baseline: M.baseline(raw.baseline) });
-      return M.validate(raw);
+      raw = JSON.parse(s);
     } catch (e) {
       throw Error(
-        e instanceof SyntaxError
-          ? "JSON повреждён или скопирован не полностью. Повторите экспорт и копирование целиком."
-          : e.message,
+        "JSON повреждён или скопирован не полностью. Повторите экспорт и копирование целиком.",
       );
     }
+    if (!raw || typeof raw !== "object")
+      throw Error("Ожидается JSON Woodline.");
+    if (raw.kind === "woodline-personalization") {
+      if (raw.version !== 1 || raw.applySeasonPlan !== true)
+        throw Error("Неподдерживаемый пакет настройки.");
+      const baseline = M.baseline(raw.baseline);
+      if (!baseline) throw Error("В пакете нет базы сравнения.");
+      const proposal = M.proposeSeasonPlan(board, P);
+      const candidate = M.validate({ ...proposal.board, baseline });
+      return {
+        candidate,
+        question: `Загрузить приватную базу сравнения за ${baseline.month}? Она не будет включена в выручку текущего цикла. ${planSummary(proposal)} Применить?`,
+        success:
+          "Личный план и историческая база загружены. Дождитесь сохранения в облаке.",
+      };
+    }
+    if (raw.kind === "woodline-baseline")
+      return {
+        candidate: M.validate({ ...board, baseline: M.baseline(raw.baseline) }),
+        question:
+          "Обновить только историческую базу сравнения? Текущие задачи и журнал фактов сохранятся.",
+        success: "База сравнения загружена; задачи и дневные факты сохранены.",
+      };
+    return {
+      candidate: M.validate(raw),
+      question:
+        "Заменить текущую доску импортированной копией? Предыдущая версия будет сохранена локально.",
+      success: "JSON восстановлен. Проверьте статус сохранения.",
+    };
+  }
+  function parseJSON(text) {
+    return prepareImport(text).candidate;
   }
   $("copyButton").onclick = async () => {
     try {
@@ -954,19 +1007,42 @@
       if (!editable()) return;
       if ($("jsonData").value.length > 10000000)
         throw Error("Копия слишком большая: максимум 10 МБ.");
-      const candidate = parseJSON($("jsonData").value);
-      if (!confirm("Заменить текущую доску импортированной копией?")) return;
+      const prepared = prepareImport($("jsonData").value);
+      if (!confirm(prepared.question)) return;
       backup();
-      board = candidate;
+      board = prepared.candidate;
       save();
       render();
       setConsole(false);
-      toast("JSON восстановлен. Проверьте статус сохранения.");
+      toast(prepared.success);
     } catch (e) {
       $("transferStatus").textContent =
         e.message + " Текущая доска не заменена.";
     }
   };
+  $("importFileButton").onclick = () => {
+    if (editable()) $("importFile").click();
+  };
+  $("importFile").addEventListener("change", async () => {
+    const file = $("importFile").files[0],
+      epoch = authEpoch;
+    if (!file) return;
+    try {
+      if (file.size > 10000000)
+        throw Error("Копия слишком большая: максимум 10 МБ.");
+      const content = await file.text();
+      if (epoch !== authEpoch) return;
+      if (!editable()) return;
+      prepareImport(content);
+      $("jsonData").value = content;
+      setConsole(true);
+      $("importButton").click();
+    } catch (e) {
+      toast(e.message + " Текущая доска не заменена.", true);
+    } finally {
+      $("importFile").value = "";
+    }
+  });
   for (const id of ["search", "horizon", "statusFilter", "tagFilter"])
     $(id).addEventListener(id === "search" ? "input" : "change", renderTasks);
   for (const button of document.querySelectorAll("[data-view]"))
@@ -1345,7 +1421,9 @@
         return;
       if (!registration?.waiting) {
         ready();
-        toast("Ожидающих обновлений нет. Вы используете установленную версию доски.");
+        toast(
+          "Ожидающих обновлений нет. Вы используете установленную версию доски.",
+        );
         return;
       }
       updateRequested = true;

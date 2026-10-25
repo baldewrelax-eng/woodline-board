@@ -72,7 +72,14 @@
           <button id="exportButton" class="primary">Экспорт JSON</button
           ><button id="copyButton">Копировать</button
           ><button id="importButton">Импорт JSON</button
-          ><button id="previousBackup">Предыдущая локальная версия</button>
+          ><button id="previousBackup">Предыдущая локальная версия</button
+          ><button id="importFileButton">Импорт файла</button
+          ><input
+            id="importFile"
+            type="file"
+            accept=".json,application/json"
+            hidden
+          />
         </div>
         <label class="field"
           >JSON<textarea id="jsonData" rows="8" spellcheck="false"></textarea>
@@ -168,8 +175,9 @@
               подтвердить вместе.
             </p>
           </div>
-          <button id="addSeasonTasks">Добавить сезонные задачи</button>
+          <button id="addSeasonTasks">Настроить сезонный план</button>
         </div>
+        <div id="teamRoles" class="analytics-grid"></div>
         <div id="seasons" class="analytics-grid"></div>
         <section class="panel">
           <h3>Месячные ориентиры</h3>
@@ -192,6 +200,14 @@
           <h3>Правила решений</h3>
           <div id="rulesList" class="analytics-grid"></div>
         </section>
+        <details id="archivedSection" class="panel" hidden>
+          <summary id="archivedSummary">Архив исходных задач</summary>
+          <p class="muted">
+            Неизменённые шаблоны из предыдущей версии. Любую задачу можно
+            вернуть; личные правки автоматически в этот архив не переносятся.
+          </p>
+          <div id="archivedList"></div>
+        </details>
         <section class="panel">
           <h3>Что ещё нужно подтвердить</h3>
           <ul id="assumptions" class="steps"></ul>

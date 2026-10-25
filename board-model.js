@@ -172,7 +172,18 @@
       if (typeof row.decision !== "string")
         throw Error("Некорректное решение исторической недели.");
     }
-    return JSON.parse(JSON.stringify(raw));
+    if (raw.archivedTasks !== undefined &&
+      (!Array.isArray(raw.archivedTasks) || raw.archivedTasks.length > 2000))
+      throw Error("Проверьте архив задач: максимум 2000 задач.");
+    const snapshot = JSON.parse(JSON.stringify(raw));
+    if (raw.archivedTasks !== undefined)
+      snapshot.archivedTasks = raw.archivedTasks.map(task);
+    return snapshot;
+  }
+  function getArchivedTasks(board) {
+    return Array.isArray(board?.legacySnapshot?.archivedTasks)
+      ? board.legacySnapshot.archivedTasks
+      : [];
   }
   function validate(raw) {
     if (raw?.version === 1) return migrate(raw);
@@ -186,9 +197,13 @@
       raw.entries.length > 5000
     )
       throw Error("Проверьте список задач и фактов.");
+    if (raw.archivedTasks !== undefined)
+      throw Error("Архив должен храниться внутри исторической копии, а не в корне доски.");
+    const snapshot = legacySnapshot(raw.legacySnapshot);
     const tasks = raw.tasks.map(task),
+      archivedTasks = getArchivedTasks({ legacySnapshot: snapshot }),
       ids = new Set();
-    for (const t of tasks) {
+    for (const t of [...tasks, ...archivedTasks]) {
       if (ids.has(t.id)) throw Error("Повтор id задачи");
       ids.add(t.id);
     }
@@ -240,7 +255,7 @@
       targets,
       baseline: baseline(raw.baseline),
       currency: text(raw.currency || "Валюта не подтверждена", "валюта", 100),
-      legacySnapshot: legacySnapshot(raw.legacySnapshot),
+      legacySnapshot: snapshot,
       updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : "",
     };
   }
@@ -312,6 +327,86 @@
       legacySnapshot: old,
       currency: "млн сум (UZS)",
     });
+  }
+  // Pure, reversible upgrade: only exact, untouched original templates leave
+  // the active list. Facts and user work are never replaced by a newer plan.
+  function proposeSeasonPlan(board, plan) {
+    const next = validate(board);
+    if (!plan || !Array.isArray(plan.tasks))
+      throw Error("Сезонный план не содержит списка задач.");
+    const templates = new Map();
+    for (const template of plan.legacyTemplates || []) {
+      if (
+        !template ||
+        typeof template.id !== "string" ||
+        !template.id.trim() ||
+        typeof template.title !== "string" ||
+        typeof template.description !== "string" ||
+        !Number.isInteger(template.phase) ||
+        template.phase < 0 ||
+        template.phase > 3 ||
+        !Number.isInteger(template.day) ||
+        template.day < 1 ||
+        template.day > 120 ||
+        templates.has(template.id)
+      )
+        throw Error("Некорректный образец исходной задачи.");
+      templates.set(template.id, template);
+    }
+    const originals = new Map((board.tasks || []).map((item) => [item.id, item]));
+    const untouched = (item) => {
+      const sample = templates.get(item.id), original = originals.get(item.id);
+      if (!sample || !next.legacySnapshot) return false;
+      return (
+        item.title === sample.title &&
+        item.description === sample.description &&
+        item.phase === sample.phase &&
+        item.due === day(next.startDate, sample.day - 1) &&
+        item.owner === "" &&
+        item.note === "" &&
+        item.completedAt === "" &&
+        item.status === "todo" &&
+        item.done === false &&
+        original?.done !== true &&
+        !original?.completedAt &&
+        item.howTo.length === 0 &&
+        item.dependsOn.length === 0 &&
+        item.priority === "normal" &&
+        (original?.priority === undefined || original.priority === "normal") &&
+        item.start === "" &&
+        ["", "Существующий план"].includes(item.tag) &&
+        ["", "Уточните критерий готовности"].includes(item.definitionDone)
+      );
+    };
+    const archivedIds = [], addedIds = [];
+    next.tasks = next.tasks.filter((item) => {
+      if (!untouched(item)) return true;
+      if (!next.legacySnapshot.archivedTasks)
+        next.legacySnapshot.archivedTasks = [];
+      next.legacySnapshot.archivedTasks.push(item);
+      archivedIds.push(item.id);
+      return false;
+    });
+    const retained = next.tasks.length;
+    const known = new Set([...next.tasks, ...getArchivedTasks(next)].map((item) => item.id));
+    const planIds = new Set();
+    for (const raw of plan.tasks) {
+      const item = task(raw);
+      if (planIds.has(item.id)) throw Error("Повтор id в сезонном плане.");
+      planIds.add(item.id);
+      if (known.has(item.id)) continue;
+      next.tasks.push(item);
+      known.add(item.id);
+      addedIds.push(item.id);
+    }
+    return {
+      board: validate(next),
+      added: addedIds.length,
+      archived: archivedIds.length,
+      retained,
+      addedIds,
+      archivedIds,
+    };
   }
   function weekIndex(date, start) {
     const d = Math.round((Date.parse(date) - Date.parse(start)) / 86400000);
@@ -400,6 +495,8 @@
     totals,
     create,
     migrate,
+    proposeSeasonPlan,
+    getArchivedTasks,
     task,
     numbers,
     report,

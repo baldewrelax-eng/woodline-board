@@ -4,7 +4,7 @@
  * Only static application code is cached. Credentials, API responses and
  * authenticated board data belong to the application outbox, never this cache.
  */
-const RELEASE = 'woodline-v2-3dfedabfe8da3dd4';
+const RELEASE = 'woodline-v2-5744edb46657aa6c';
 const SCOPE = new URL(self.registration.scope);
 const CACHE_PREFIX = 'woodline-shell:' + encodeURIComponent(SCOPE.pathname) + ':';
 const CACHE_NAME = CACHE_PREFIX + RELEASE;
