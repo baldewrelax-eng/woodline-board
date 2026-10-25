@@ -15,7 +15,7 @@ class FakeAPI:
         if path=='/organizations': return [{'name':'Woodline Free','id':'org','slug':'org'}]
         if path=='/organizations/org':return {'plan':self.plan}
         if path=='/projects' and method=='GET':return [{'name':'woodline-board','id':'project','organization_id':'org'}]
-        if path=='/projects/project':return {'status':'ACTIVE_HEALTHY'}
+        if path.startswith('/projects/') and path.count('/')==2:return {'status':'ACTIVE_HEALTHY'}
         if path.endswith('/database/query'):
             return [{'board_rls':True,'history_rls':True,'anon_denied':True,'direct_write_denied':True}] if body['read_only'] else []
         if path.endswith('/config/auth'):
@@ -37,5 +37,17 @@ class ProvisionTests(unittest.TestCase):
         self.assertIn('https://existing.example.com/',patch['uri_allow_list'])
         self.assertIn(module.SITE,patch['uri_allow_list'])
         self.assertNotIn('mailer_autoconfirm',patch)
+
+    def test_project_scoped_token_never_requires_organization_access_or_new_resources(self):
+        api=FakeAPI()
+        result=module.provision(api,project_ref='abcdefghijklmnopqrst',write_config=False)
+        self.assertTrue(result['schema_verified'])
+        self.assertEqual(result['project'],'abcdefghijklmnopqrst')
+        self.assertTrue(all(path.startswith('/projects/abcdefghijklmnopqrst') for path,_,_ in api.calls))
+        self.assertFalse(any(path=='/projects' and method=='POST' for path,method,_ in api.calls))
+    def test_bad_project_reference_fails_before_api_calls(self):
+        api=FakeAPI()
+        with self.assertRaisesRegex(RuntimeError,'reference'):module.provision(api,project_ref='../other',write_config=False)
+        self.assertEqual(api.calls,[])
 
 if __name__=='__main__':unittest.main()

@@ -3,7 +3,9 @@
 Only public browser configuration is written. No token, API secret or database
 password is printed or committed. Uses HTTPS proxy settings through urllib.
 """
+import argparse
 import json
+import re
 import os
 from pathlib import Path
 import secrets
@@ -37,29 +39,36 @@ class Management:
                                'Check token permissions, organization quotas and network access.') from None
 
 
-def provision(api, *, write_config=True, wait=time.sleep):
-    orgs = api.request('/organizations')
-    named = [org for org in orgs if org['name'] == 'Woodline Free']
-    if len(named) > 1:
-        raise RuntimeError('Multiple Woodline Free organizations found; choose the intended one explicitly before continuing.')
-    org = named[0] if named else api.request('/organizations', 'POST', {'name': 'Woodline Free'})
-    slug = org.get('slug') or org['id']
-    details = api.request('/organizations/' + slug)
-    if details.get('plan') != 'free':
-        raise RuntimeError('Organization is not confirmed free. No project created, no billing plan changed.')
-    projects = [p for p in api.request('/projects') if p.get('organization_id') == org['id'] and p['name'] == 'woodline-board']
-    if len(projects) > 1:
-        raise RuntimeError('Multiple matching projects; no project chosen automatically.')
-    if projects:
-        project = projects[0]
+def provision(api, *, project_ref=None, write_config=True, wait=time.sleep):
+    slug = None
+    if project_ref:
+        if not re.fullmatch(r'[a-z]{20}', project_ref):
+            raise RuntimeError('Expected an existing 20-letter Supabase project reference.')
+        ref = project_ref
+        # Scoped tokens must never need organization-wide discovery or resource creation.
     else:
-        project = api.request('/projects', 'POST', {
-            'name': 'woodline-board', 'organization_slug': slug,
-            'db_pass': secrets.token_urlsafe(40),
-            'region_selection': {'type': 'smartGroup', 'code': 'emea'}
-        })
-        # Password is intentionally not retained; owner can reset it in Supabase.
-    ref = project['id']
+        orgs = api.request('/organizations')
+        named = [org for org in orgs if org['name'] == 'Woodline Free']
+        if len(named) > 1:
+            raise RuntimeError('Multiple Woodline Free organizations found; choose the intended one explicitly before continuing.')
+        org = named[0] if named else api.request('/organizations', 'POST', {'name': 'Woodline Free'})
+        slug = org.get('slug') or org['id']
+        details = api.request('/organizations/' + slug)
+        if details.get('plan') != 'free':
+            raise RuntimeError('Organization is not confirmed free. No project created, no billing plan changed.')
+        projects = [p for p in api.request('/projects') if p.get('organization_id') == org['id'] and p['name'] == 'woodline-board']
+        if len(projects) > 1:
+            raise RuntimeError('Multiple matching projects; no project chosen automatically.')
+        if projects:
+            project = projects[0]
+        else:
+            project = api.request('/projects', 'POST', {
+                'name': 'woodline-board', 'organization_slug': slug,
+                'db_pass': secrets.token_urlsafe(40),
+                'region_selection': {'type': 'smartGroup', 'code': 'emea'}
+            })
+            # Password is intentionally not retained; owner can reset it in Supabase.
+        ref = project['id']
     for attempt in range(40):
         state = api.request('/projects/' + ref)
         if state.get('status') == 'ACTIVE_HEALTHY':
@@ -97,11 +106,14 @@ not has_table_privilege('authenticated','public.woodline_boards','UPDATE') as di
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Configure Woodline on Supabase.')
+    parser.add_argument('--project-ref', help='Use an existing project with a project-scoped token; no organization access required.')
+    args = parser.parse_args()
     token = os.environ.get('SUPABASE_ACCESS_TOKEN')
     if not token:
         sys.exit('Missing SUPABASE_ACCESS_TOKEN. Add it securely in environment settings, not in chat or command arguments.')
     try:
-        result = provision(Management(token))
+        result = provision(Management(token), project_ref=args.project_ref)
         print(json.dumps(result, ensure_ascii=False))
         print('Public app configuration written. Commit and publish it; then verify signup and sign-in on the actual site.')
     except Exception as error:
