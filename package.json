@@ -1,0 +1,8 @@
+{
+  "name": "woodline-board",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Woodline — план роста e-commerce на 120 дней",
+  "engines": { "node": ">=22" },
+  "scripts": { "start": "node server.js" }
+}
