@@ -909,6 +909,13 @@
   }
   $("consoleToggle").onclick = () => setConsole($("console").hidden);
   $("closeConsole").onclick = () => setConsole(false);
+  $("refreshApp").onclick = () => {
+    if (cloudUser && cloud?.getSnapshot().pending) {
+      toast("Дождитесь отправки изменений в облако или сохраните JSON перед обновлением.", true);
+      return;
+    }
+    location.assign("./update.html");
+  };
   $("exportButton").onclick = () => {
     $("jsonData").value = JSON.stringify(board, null, 2);
     $("jsonData").focus({ preventScroll: true });

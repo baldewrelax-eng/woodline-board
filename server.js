@@ -5,6 +5,7 @@ const http = require("node:http"),
 const assets = new Map(
   [
     "index.html",
+    "update.html",
     "dashboard.css",
     "app-config.js",
     "plan-data.js",
